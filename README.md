@@ -1,0 +1,1 @@
+# bloomshine-fashion-jewellery

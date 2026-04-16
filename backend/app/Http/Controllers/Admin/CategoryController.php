@@ -1,0 +1,93 @@
+<?php
+
+namespace App\Http\Controllers\Admin;
+
+use App\Http\Controllers\Controller;
+use App\Http\Resources\CategoryResource;
+use App\Models\Category;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
+
+class CategoryController extends Controller
+{
+    public function index()
+    {
+        $categories = Category::withCount('products')->orderBy('name')->get();
+        return CategoryResource::collection($categories);
+    }
+
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'name'   => 'required|string|max:255',
+            'image'  => 'nullable|image|mimes:jpeg,png,jpg,gif,webp',
+            'status' => 'in:active,inactive',
+        ]);
+
+        $validated['slug'] = Str::slug($validated['name']);
+
+        // Ensure unique slug
+        $originalSlug = $validated['slug'];
+        $counter = 1;
+        while (Category::where('slug', $validated['slug'])->exists()) {
+            $validated['slug'] = $originalSlug . '-' . $counter++;
+        }
+
+        // Handle image upload
+        if ($request->hasFile('image')) {
+            $path = $request->file('image')->store('categories', 'public');
+            $validated['image'] = $path;
+        }
+
+        $category = Category::create($validated);
+
+        return (new CategoryResource($category))->response()->setStatusCode(201);
+    }
+
+    public function update(Request $request, Category $category)
+    {
+        $validated = $request->validate([
+            'name'   => 'sometimes|required|string|max:255',
+            'image'  => 'nullable|image|mimes:jpeg,png,jpg,gif,webp',
+            'status' => 'in:active,inactive',
+        ]);
+
+        if (isset($validated['name'])) {
+            $newSlug = Str::slug($validated['name']);
+            if ($newSlug !== $category->slug) {
+                $originalSlug = $newSlug;
+                $counter = 1;
+                while (Category::where('slug', $newSlug)->where('id', '!=', $category->id)->exists()) {
+                    $newSlug = $originalSlug . '-' . $counter++;
+                }
+                $validated['slug'] = $newSlug;
+            }
+        }
+
+        // Handle image upload
+        if ($request->hasFile('image')) {
+            // Delete old image if exists
+            if ($category->image) {
+                Storage::disk('public')->delete($category->image);
+            }
+            $path = $request->file('image')->store('categories', 'public');
+            $validated['image'] = $path;
+        }
+
+        $category->update($validated);
+
+        return new CategoryResource($category->fresh());
+    }
+
+    public function destroy(Category $category)
+    {
+        // Delete image if exists
+        if ($category->image) {
+            Storage::disk('public')->delete($category->image);
+        }
+        
+        $category->delete();
+        return response()->json(['message' => 'Category deleted successfully']);
+    }
+}
